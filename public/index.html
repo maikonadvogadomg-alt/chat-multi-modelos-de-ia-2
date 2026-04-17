@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Multi-IA — Chat com vários modelos</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117;
+      --panel: #1a1d2e;
+      --border: #2a2d3e;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --accent: #6366f1;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Header */
+    header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+    header h1 { font-size: 1rem; font-weight: 700; flex: 1; }
+    header span { font-size: 11px; color: var(--muted); }
+
+    /* Seletor de provedor */
+    .provider-bar { display: flex; gap: 6px; padding: 10px 12px; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; scrollbar-width: none; }
+    .provider-bar::-webkit-scrollbar { display: none; }
+    .prov-btn { white-space: nowrap; padding: 5px 12px; border-radius: 20px; border: 1px solid transparent; font-size: 12px; cursor: pointer; transition: all 0.2s; background: rgba(255,255,255,0.04); color: var(--muted); }
+    .prov-btn.active { color: #fff; border-color: currentColor; }
+    .prov-btn.inactive { opacity: 0.4; cursor: not-allowed; }
+    .prov-btn.ativo:hover { opacity: 0.9; }
+
+    /* Key override */
+    .key-bar { padding: 8px 12px; background: #0d1117; border-bottom: 1px solid var(--border); display: flex; gap-6px; gap: 6px; flex-shrink: 0; display: none; }
+    .key-bar.show { display: flex; }
+    .key-bar input { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--text); font-family: monospace; outline: none; }
+    .key-bar input:focus { border-color: var(--accent); }
+    .key-bar button { padding: 6px 12px; border-radius: 8px; background: var(--accent); border: none; color: #fff; font-size: 12px; cursor: pointer; }
+
+    /* Chat */
+    #chat { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .msg { max-width: 85%; border-radius: 12px; padding: 10px 14px; font-size: 13px; line-height: 1.6; }
+    .msg.user { background: #1e3a5f; color: #c8e6ff; align-self: flex-end; border-bottom-right-radius: 4px; }
+    .msg.bot { background: var(--panel); border: 1px solid var(--border); align-self: flex-start; border-bottom-left-radius: 4px; }
+    .msg.bot .prov-tag { font-size: 10px; font-weight: 700; margin-bottom: 4px; opacity: 0.7; }
+    .msg pre { background: #0d1117; border-radius: 6px; padding: 8px; font-size: 11px; overflow-x: auto; margin: 6px 0; }
+    .msg code { font-family: 'Consolas', monospace; }
+    .cursor { display: inline-block; width: 2px; height: 14px; background: var(--accent); margin-left: 2px; animation: blink 1s infinite; vertical-align: middle; }
+    @keyframes blink { 0%,100%{opacity:1}50%{opacity:0} }
+    .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--muted); text-align: center; padding: 24px; }
+    .empty-state h2 { font-size: 1.2rem; color: var(--text); }
+    .empty-state p { font-size: 13px; line-height: 1.6; max-width: 400px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 8px; }
+    .chip { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); font-size: 12px; cursor: pointer; background: var(--panel); transition: all 0.2s; }
+    .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Input bar */
+    .input-bar { padding: 10px 12px; background: var(--panel); border-top: 1px solid var(--border); display: flex; gap: 8px; flex-shrink: 0; }
+    .input-bar textarea { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; font-size: 13px; color: var(--text); resize: none; outline: none; font-family: inherit; min-height: 44px; max-height: 120px; line-height: 1.5; }
+    .input-bar textarea:focus { border-color: var(--accent); }
+    .send-btn { width: 44px; height: 44px; border-radius: 12px; background: var(--accent); border: none; color: #fff; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: opacity 0.2s; }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .stop-btn { width: 44px; height: 44px; border-radius: 12px; background: #dc2626; border: none; color: #fff; font-size: 16px; cursor: pointer; flex-shrink: 0; }
+    .model-sel { padding: 8px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); color: var(--muted); font-size: 11px; outline: none; cursor: pointer; }
+
+    /* Config overlay */
+    .cfg-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; display: none; align-items: flex-end; }
+    .cfg-overlay.show { display: flex; }
+    .cfg-panel { width: 100%; background: var(--panel); border-radius: 20px 20px 0 0; padding: 20px; max-height: 80vh; overflow-y: auto; }
+    .cfg-panel h3 { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+    .cfg-row { margin-bottom: 10px; }
+    .cfg-row label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; }
+    .cfg-row input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: var(--text); font-family: monospace; outline: none; }
+    .cfg-row input:focus { border-color: var(--accent); }
+    .cfg-close { width: 100%; padding: 12px; background: var(--accent); border: none; color: #fff; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:20px">🤖</span>
+  <h1>Multi-IA Chat</h1>
+  <button onclick="toggleCfg()" style="padding:6px 12px;background:rgba(255,255,255,0.05);border:1px solid #2a2d3e;border-radius:8px;color:#94a3b8;font-size:12px;cursor:pointer">
+    ⚙️ Chaves
+  </button>
+</header>
+
+<div class="provider-bar" id="provBar"></div>
+
+<div id="chat">
+  <div class="empty-state" id="emptyState">
+    <span style="font-size:48px">🤖</span>
+    <h2>Multi-IA Chat</h2>
+    <p>Converse com Groq, OpenAI, Gemini, Claude, Grok, OpenRouter e Perplexity — tudo em um lugar.</p>
+    <div class="chips">
+      <div class="chip" onclick="setPrompt('Olá! Quem é você e qual modelo está usando?')">Quem é você?</div>
+      <div class="chip" onclick="setPrompt('Explique inteligência artificial em linguagem simples.')">O que é IA?</div>
+      <div class="chip" onclick="setPrompt('Escreva um código Python para ler um arquivo CSV e mostrar as primeiras 5 linhas.')">Código Python</div>
+      <div class="chip" onclick="setPrompt('Me dê 5 ideias de negócios baseados em IA para um advogado.')">Ideias para advogado</div>
+    </div>
+  </div>
+</div>
+
+<div class="input-bar">
+  <select id="modelSel" class="model-sel" title="Modelo"></select>
+  <textarea id="input" placeholder="Digite sua mensagem… (Enter para enviar)" rows="1"
+    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"
+    oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+  <button class="stop-btn" id="stopBtn" style="display:none" onclick="abortStream()">⏹</button>
+  <button class="send-btn" id="sendBtn" onclick="send()" disabled>➤</button>
+</div>
+
+<!-- Overlay de configuração de chaves -->
+<div class="cfg-overlay" id="cfgOverlay" onclick="if(event.target===this)toggleCfg()">
+  <div class="cfg-panel">
+    <h3>🔑 Suas Chaves de API</h3>
+    <p style="font-size:12px;color:#64748b;margin-bottom:14px">
+      Salvas apenas no navegador (localStorage). Nunca enviadas para terceiros.
+    </p>
+    <div id="cfgFields"></div>
+    <button class="cfg-close" onclick="saveCfgAndClose()">✓ Salvar e fechar</button>
+  </div>
+</div>
+
+<script>
+// ── Estado ───────────────────────────────────────────────────────────────────
+let provedores = [];
+let provAtivo = null;
+let historico = [];
+let controller = null;
+
+const LS_KEYS = 'mia_api_keys';
+const savedKeys = JSON.parse(localStorage.getItem(LS_KEYS) || '{}');
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+async function boot() {
+  const resp = await fetch('/api/provedores');
+  provedores = await resp.json();
+  renderProvBar();
+  const primeiro = provedores.find(p => p.ativo || savedKeys[p.id]) || provedores[0];
+  if (primeiro) selectProv(primeiro.id);
+  renderCfgFields();
+}
+
+function renderProvBar() {
+  const bar = document.getElementById('provBar');
+  bar.innerHTML = '';
+  provedores.forEach(p => {
+    const hasKey = p.ativo || !!savedKeys[p.id];
+    const btn = document.createElement('button');
+    btn.className = 'prov-btn' + (hasKey ? '' : ' inactive');
+    btn.style.setProperty('--pc', p.cor);
+    btn.textContent = (hasKey ? '' : '🔒 ') + p.nome;
+    btn.dataset.id = p.id;
+    if (hasKey) btn.onclick = () => selectProv(p.id);
+    else btn.onclick = () => { toggleCfg(); };
+    bar.appendChild(btn);
+  });
+}
+
+function selectProv(id) {
+  provAtivo = provedores.find(p => p.id === id);
+  document.querySelectorAll('.prov-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.id === id);
+    if (b.dataset.id === id && provAtivo) b.style.color = provAtivo.cor;
+    else b.style.color = '';
+  });
+  // Atualiza select de modelos
+  const modelos = getModelos(id);
+  const sel = document.getElementById('modelSel');
+  sel.innerHTML = modelos.map(m => '<option value="' + m.v + '">' + m.n + '</option>').join('');
+  document.getElementById('sendBtn').disabled = false;
+}
+
+function getModelos(id) {
+  const map = {
+    groq:       [{v:'llama-3.3-70b-versatile',n:'Llama 3.3 70B'},{v:'llama-3.1-8b-instant',n:'Llama 3.1 8B (rápido)'},{v:'gemma2-9b-it',n:'Gemma2 9B'},{v:'mixtral-8x7b-32768',n:'Mixtral 8x7B'}],
+    openai:     [{v:'gpt-4o-mini',n:'GPT-4o Mini'},{v:'gpt-4o',n:'GPT-4o'},{v:'gpt-3.5-turbo',n:'GPT-3.5 Turbo'}],
+    gemini:     [{v:'gemini-2.0-flash',n:'Gemini 2.0 Flash'},{v:'gemini-1.5-pro',n:'Gemini 1.5 Pro'},{v:'gemini-1.5-flash',n:'Gemini 1.5 Flash'}],
+    anthropic:  [{v:'claude-haiku-4-20250514',n:'Claude Haiku 4'},{v:'claude-sonnet-4-5',n:'Claude Sonnet 4.5'},{v:'claude-opus-4-5',n:'Claude Opus 4.5'}],
+    xai:        [{v:'grok-2-latest',n:'Grok 2'},{v:'grok-3-mini',n:'Grok 3 Mini'}],
+    openrouter: [{v:'openai/gpt-4o-mini',n:'GPT-4o Mini (OR)'},{v:'anthropic/claude-haiku',n:'Claude Haiku (OR)'},{v:'google/gemini-flash-1.5',n:'Gemini Flash (OR)'},{v:'meta-llama/llama-3.3-70b',n:'Llama 3.3 70B (OR)'}],
+    perplexity: [{v:'sonar-pro',n:'Sonar Pro'},{v:'sonar',n:'Sonar'},{v:'sonar-reasoning',n:'Sonar Reasoning'}],
+  };
+  return map[id] || [{v: provedores.find(p=>p.id===id)?.modelo || 'default', n:'Padrão'}];
+}
+
+// ── Enviar mensagem ───────────────────────────────────────────────────────────
+function setPrompt(txt) {
+  const el = document.getElementById('input');
+  el.value = txt;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  el.focus();
+}
+
+async function send() {
+  const el = document.getElementById('input');
+  const text = el.value.trim();
+  if (!text || !provAtivo) return;
+
+  document.getElementById('emptyState')?.remove();
+  el.value = '';
+  el.style.height = '44px';
+
+  historico.push({ role: 'user', content: text });
+  addMsg('user', text);
+
+  controller = new AbortController();
+  document.getElementById('sendBtn').style.display = 'none';
+  document.getElementById('stopBtn').style.display = 'flex';
+
+  const botEl = addMsg('bot', '', provAtivo);
+  const contentEl = botEl.querySelector('.bot-content');
+  const cursor = document.createElement('span');
+  cursor.className = 'cursor';
+  contentEl.appendChild(cursor);
+
+  try {
+    const modelo = document.getElementById('modelSel').value;
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provedor: provAtivo.id,
+        mensagens: [
+          { role: 'system', content: 'Você é um assistente útil. Responda em português quando o usuário escrever em português.' },
+          ...historico,
+        ],
+        modelo,
+        apiKeyOverride: savedKeys[provAtivo.id] || undefined,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!resp.ok) {
+      const e = await resp.json();
+      cursor.remove();
+      contentEl.innerHTML = '<span style="color:#f87171">❌ ' + (e.erro || 'Erro ' + resp.status) + '</span>';
+      historico.pop();
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let full = '', buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const j = line.slice(6).trim();
+        if (j === '[DONE]') continue;
+        try {
+          const p = JSON.parse(j);
+          const delta = p.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            full += delta;
+            cursor.remove();
+            contentEl.innerHTML = formatMd(full);
+            contentEl.appendChild(cursor);
+            document.getElementById('chat').scrollTop = 9999;
+          }
+        } catch {}
+      }
+    }
+
+    cursor.remove();
+    if (full) {
+      historico.push({ role: 'assistant', content: full });
+      contentEl.innerHTML = formatMd(full);
+    }
+
+  } catch (err) {
+    cursor.remove();
+    if (err.name !== 'AbortError') {
+      contentEl.innerHTML = '<span style="color:#f87171">❌ ' + err.message + '</span>';
+      historico.pop();
+    }
+  } finally {
+    controller = null;
+    document.getElementById('sendBtn').style.display = 'flex';
+    document.getElementById('stopBtn').style.display = 'none';
+    document.getElementById('chat').scrollTop = 9999;
+  }
+}
+
+function abortStream() {
+  controller?.abort();
+}
+
+// ── Renderização ─────────────────────────────────────────────────────────────
+function addMsg(role, text, prov) {
+  const chat = document.getElementById('chat');
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  if (role === 'bot' && prov) {
+    div.innerHTML =
+      '<div class="prov-tag" style="color:' + prov.cor + '">' + prov.nome + '</div>' +
+      '<div class="bot-content">' + formatMd(text) + '</div>';
+  } else {
+    div.textContent = text;
+  }
+  chat.appendChild(div);
+  chat.scrollTop = 9999;
+  return div;
+}
+
+function formatMd(text) {
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+    .replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:1px 4px;border-radius:3px">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+}
+
+// ── Config ────────────────────────────────────────────────────────────────────
+function renderCfgFields() {
+  const el = document.getElementById('cfgFields');
+  el.innerHTML = provedores.map(p => `
+    <div class="cfg-row">
+      <label style="color:${p.cor}">${p.nome} — ${p.modelo}</label>
+      <input type="password" id="cfgkey_${p.id}"
+        placeholder="Chave de API (${p.ativo ? 'já configurada no .env' : 'não configurada'})"
+        value="${savedKeys[p.id] || ''}">
+    </div>
+  `).join('');
+}
+
+function saveCfgAndClose() {
+  provedores.forEach(p => {
+    const el = document.getElementById('cfgkey_' + p.id);
+    if (el.value.trim()) savedKeys[p.id] = el.value.trim();
+    else delete savedKeys[p.id];
+  });
+  localStorage.setItem(LS_KEYS, JSON.stringify(savedKeys));
+  toggleCfg();
+  // Reativa provedores com chave manual
+  provedores = provedores.map(p => ({ ...p, ativo: p.ativo || !!savedKeys[p.id] }));
+  renderProvBar();
+}
+
+function toggleCfg() {
+  document.getElementById('cfgOverlay').classList.toggle('show');
+}
+
+boot();
+</script>
+</body>
+</html>
